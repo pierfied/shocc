@@ -2,7 +2,7 @@ from setuptools import setup
 from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 
 setup(
-    name='shocc',
+    name='SHoCC',
     version='0.1',
     packages=['shocc'],
     url='https://github.com/pierfied/shocc',
@@ -13,8 +13,9 @@ setup(
     ext_modules=[
         CUDAExtension(
             name='shocc.driver',
-            sources=[],
-            extra_compile_args={'nvcc': ['-O3']}
+            sources=['src/shocc.cpp'],
+            extra_compile_args={'cxx': [],
+                                'nvcc': ['-O3']}
         )
     ],
     cmdclass={
