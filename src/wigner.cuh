@@ -5,13 +5,13 @@
 #ifndef SHOCC_WIGNER_CUH
 #define SHOCC_WIGNER_CUH
 
-__device__ __forceinline__
+__device__
 double lnfac(double x);
 
-__device__ __forceinline__
+__device__
 double emmRecursionSeed(double j, double m, double beta);
 
-__device__ __forceinline__
+__device__
 double spinRecursionSeed(double j, double m, double beta);
 
 __global__

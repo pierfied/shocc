@@ -9,8 +9,9 @@
 #include <cuComplex.h>
 
 __global__
-void alm2mapKernel();
+void FKernel(int lmax, int nrings, cuDoubleComplex *F, cuDoubleComplex *alm,
+             double *ringTheta, double *ringPhi0, double *fac1, double *fac2, double *fac3);
 
-void alm2map(torch::Tensor alm, int nside);
+void alm2map(torch::Tensor alm, int nside, int lmax);
 
 #endif //SHOCC_STANDARD_TRANSFORMS_CUH
