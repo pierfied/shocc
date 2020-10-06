@@ -11,7 +11,7 @@ void hello() {
     std::cout << "Hello, World!" << std::endl;
 }
 
-PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+PYBIND11_MODULE(driver, m) {
     m.def("hello", &hello);
     m.def("alm2map", &alm2map);
 }
