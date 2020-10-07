@@ -48,7 +48,7 @@ __global__ void FKernel(int lmax, int nrings, cuDoubleComplex *F, cuDoubleComple
     }
 }
 
-void alm2map(torch::Tensor alm, torch::Tensor map, int nside, int lmax) {
+torch::Tensor alm2map(torch::Tensor alm, int nside, int lmax) {
     // Start computing the recursion coefficients on the GPU now while we compute Healpix stuff next.
     double *fac1, *fac2, *fac3;
     computeRecursionCoeffs(lmax, 0, &fac1, &fac2, &fac3);
@@ -87,8 +87,11 @@ void alm2map(torch::Tensor alm, torch::Tensor map, int nside, int lmax) {
     cudaOccupancyMaxPotentialBlockSize(&gridSize, &blockSize, FKernel, 0, 0);
     FKernel<<<gridSize, blockSize>>>(lmax, nrings, F, almPtr, ringTheta, ringPhi0, fac1, fac2, fac3);
 
-    // Perform the FFTs to build the map.
+    // Create the map tensor.
+    torch::Tensor map = torch::zeros(npix, torch::dtype(torch::kFloat64).device(torch::kCUDA));
     double *mapPtr = map.data<double>();
+
+    // Perform the FFTs to build the map.
     for (int i = 0; i < nrings; i++) {
         cufftHandle plan;
         double *ringPtr = &mapPtr[ringStart[i]];
@@ -106,4 +109,6 @@ void alm2map(torch::Tensor alm, torch::Tensor map, int nside, int lmax) {
     cudaFree(ringTheta);
     cudaFree(ringPhi0);
     cudaFree(F);
+
+    return map;
 }
