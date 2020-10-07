@@ -59,7 +59,7 @@ __global__ void recursionCoeffKernel(int lmax, int spin, double *fac1, double *f
 
 void computeRecursionCoeffs(int lmax, int spin, double **fac1, double **fac2, double **fac3) {
     // Create the arrays for the coefficients.
-    int facSize = lmax * (lmax + 1) / 2;
+    int facSize = (lmax + 1) * (lmax + 2) / 2;
     cudaMallocManaged(fac1, sizeof(double) * facSize);
     cudaMallocManaged(fac2, sizeof(double) * facSize);
     cudaMallocManaged(fac3, sizeof(double) * facSize);
