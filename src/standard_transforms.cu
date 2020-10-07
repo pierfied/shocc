@@ -16,8 +16,8 @@ __global__ void FKernel(int lmax, int nrings, cuDoubleComplex *F, cuDoubleComple
     int stride = blockDim.x * gridDim.x;
 
     for (int i = index; i < (lmax + 1) * nrings; i += stride) {
-        int y = i / nrings;
-        int m = i % nrings;
+        int y = i / (lmax + 1);
+        int m = i % (lmax + 1);
 
         // Initialize F[m,y] to zero.
         F[i].x = 0;
@@ -98,6 +98,7 @@ torch::Tensor alm2map(torch::Tensor alm, int nside, int lmax) {
         cufftDoubleComplex *data = &F[i * (lmax + 1)];
         cufftPlan1d(&plan, ringPix[i], CUFFT_Z2D, 1);
         cufftExecZ2D(plan, data, ringPtr);
+        cufftDestroy(plan);
     }
 
     // Free arrays.
