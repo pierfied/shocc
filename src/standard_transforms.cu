@@ -5,6 +5,7 @@
 #include <healpix_cxx/healpix_base.h>
 #include <iostream>
 #include <cuComplex.h>
+#include <cufft.h>
 
 #include "standard_transforms.cuh"
 #include "wigner.cuh"
@@ -14,9 +15,9 @@ __global__ void FKernel(int lmax, int nrings, cuDoubleComplex *F, cuDoubleComple
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
 
-    for (int i = index; i < (lmax + 1) * nrings; i += stride){
-        int m = i / nrings;
-        int y = i % nrings;
+    for (int i = index; i < (lmax + 1) * nrings; i += stride) {
+        int y = i / nrings;
+        int m = i % nrings;
 
         // Initialize F[m,y] to zero.
         F[i].x = 0;
@@ -28,7 +29,7 @@ __global__ void FKernel(int lmax, int nrings, cuDoubleComplex *F, cuDoubleComple
 
         // Loop over l to compute F.
         double cosTheta = cos(ringTheta[y]);
-        for (int l = m; l <= lmax; l++){
+        for (int l = m; l <= lmax; l++) {
             int ind = m * (lmax + 1) - (m - 1) * m / 2 + (l - m);
 
             // Compute the contributions to F.
@@ -47,7 +48,7 @@ __global__ void FKernel(int lmax, int nrings, cuDoubleComplex *F, cuDoubleComple
     }
 }
 
-void alm2map(torch::Tensor alm, int nside, int lmax) {
+void alm2map(torch::Tensor alm, torch::Tensor map, int nside, int lmax) {
     // Start computing the recursion coefficients on the GPU now while we compute Healpix stuff next.
     double *fac1, *fac2, *fac3;
     computeRecursionCoeffs(lmax, 0, &fac1, &fac2, &fac3);
@@ -86,5 +87,23 @@ void alm2map(torch::Tensor alm, int nside, int lmax) {
     cudaOccupancyMaxPotentialBlockSize(&gridSize, &blockSize, FKernel, 0, 0);
     FKernel<<<gridSize, blockSize>>>(lmax, nrings, F, almPtr, ringTheta, ringPhi0, fac1, fac2, fac3);
 
-    std::cout << "F[0]: " << F[0].x << " + " << F[0].y << "j" << std::endl;
+    // Perform the FFTs to build the map.
+    double *mapPtr = map.data<double>();
+    for (int i = 0; i < nrings; i++) {
+        cufftHandle plan;
+        double *ringPtr = &mapPtr[ringStart[i]];
+        cufftDoubleComplex *data = &F[i * (lmax + 1)];
+        cufftPlan1d(&plan, ringPix[i], CUFFT_Z2D, 1);
+        cufftExecZ2D(plan, data, ringPtr);
+    }
+
+    // Free arrays.
+    cudaFree(fac1);
+    cudaFree(fac2);
+    cudaFree(fac3);
+    cudaFree(ringPix);
+    cudaFree(ringStart);
+    cudaFree(ringTheta);
+    cudaFree(ringPhi0);
+    cudaFree(F);
 }

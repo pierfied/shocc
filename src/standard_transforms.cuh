@@ -12,6 +12,6 @@ __global__
 void FKernel(int lmax, int nrings, cuDoubleComplex *F, cuDoubleComplex *alm,
              double *ringTheta, double *ringPhi0, double *fac1, double *fac2, double *fac3);
 
-void alm2map(torch::Tensor alm, int nside, int lmax);
+void alm2map(torch::Tensor alm, torch::Tensor map, int nside, int lmax);
 
 #endif //SHOCC_STANDARD_TRANSFORMS_CUH
