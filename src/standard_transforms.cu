@@ -10,41 +10,74 @@
 #include "standard_transforms.cuh"
 #include "wigner.cuh"
 
-__global__ void FKernel(int lmax, int nrings, cuDoubleComplex *F, cuDoubleComplex *alm,
+#define CHUNKSIZE 16
+
+__global__ void FKernel(int lmax, int nrings, int nchunks, cuDoubleComplex *F, cuDoubleComplex *alm,
                         double *ringTheta, double *ringPhi0, double *fac1, double *fac2, double *fac3) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
 
-    for (int i = index; i < (lmax + 1) * nrings; i += stride) {
-        int y = i / (lmax + 1);
-        int m = i % (lmax + 1);
+    for (int i = index; i < (lmax + 1) * nchunks; i += stride) {
+        int m = i / nchunks;
+        int c = i % nchunks;
+        int yOffset = c * CHUNKSIZE;
 
-        // Initialize F[m,y] to zero.
-        F[i].x = 0;
-        F[i].y = 0;
+        cuDoubleComplex FVals[CHUNKSIZE];
+        double dlm[CHUNKSIZE], prevDlm[CHUNKSIZE], cosTheta[CHUNKSIZE], cosPhase[CHUNKSIZE], sinPhase[CHUNKSIZE];
 
-        // Seed the recursion.
-        double dlm = emmRecursionSeed(m, 0., ringTheta[y]);
-        double prevDlm = 0;
-
-        // Loop over l to compute F.
-        double cosTheta = cos(ringTheta[y]);
-        for (int l = m; l <= lmax; l++) {
-            int ind = m * (lmax + 1) - (m - 1) * m / 2 + (l - m);
-
-            // Compute the contributions to F.
-            double sLambdalm = pow(-1, m) * sqrt((2. * l + 1) / (4 * M_PI)) * dlm;
-            F[i].x += alm[ind].x * sLambdalm;
-            F[i].y += alm[ind].y * sLambdalm;
-
-            // Compute the next wigner d value.
-            double tmpDlm = fac1[ind] * cosTheta * dlm - fac3[ind] * prevDlm;
-            prevDlm = dlm;
-            dlm = tmpDlm;
+#pragma unroll
+        for (int j = 0; j < CHUNKSIZE; j++) {
+            dlm[j] = emmRecursionSeed(m, 0, ringTheta[yOffset + j]);
+            prevDlm[j] = 0;
+            cosTheta[j] = cos(ringTheta[yOffset + j]);
+            cosPhase[j] = cos(ringPhi0[yOffset + j]);
+            sinPhase[j] = sin(ringPhi0[yOffset + j]);
+            FVals[j].x = 0;
+            FVals[j].y = 0;
         }
 
-        // Apply the phase shift for the ring.
-        F[i] = cuCmul(F[i], make_cuDoubleComplex(cos(m * ringPhi0[y]), sin(m * ringPhi0[y])));
+        int ind = m * (lmax + 1) - (m - 1) * m / 2;
+        double sLambdalm[CHUNKSIZE], tmpDlm[CHUNKSIZE];
+
+        for (int l = m; l <= lmax; l++){
+            double prefac = pow(-1, m) * sqrt((2. * l + 1) / (4 * M_PI));
+            cuDoubleComplex almVal = alm[ind];
+            double fac1Val = fac1[ind];
+            double fac3Val = fac3[ind];
+
+//#pragma unroll
+//            for (int j = 0; j < CHUNKSIZE; j++){
+//                sLambdalm[j] = prefac * dlm[j];
+//            }
+
+#pragma unroll
+            for (int j = 0; j < CHUNKSIZE; j++){
+                sLambdalm[j] = prefac * dlm[j];
+                tmpDlm[j] = fac1Val * cosTheta[j] * dlm[j] - fac3Val * prevDlm[j];
+                prevDlm[j] = dlm[j];
+                dlm[j] = tmpDlm[j];
+                FVals[j].x += almVal.x * sLambdalm[j];
+                FVals[j].y += almVal.y * sLambdalm[j];
+            }
+
+//#pragma unroll
+//            for (int j = 0; j < CHUNKSIZE; j++){
+//                tmpDlm[j] = fac1Val * cosTheta[j] * dlm[j] - fac3Val * prevDlm[j];
+//                prevDlm[j] = dlm[j];
+//                dlm[j] = tmpDlm[j];
+//            }
+
+//#pragma unroll
+//            for (int j = 0; j < CHUNKSIZE; j++){
+//            }
+
+            ind++;
+        }
+
+#pragma unroll
+        for (int j = 0; j < CHUNKSIZE; j++){
+            F[(yOffset + j) * (lmax + 1) + m] = cuCmul(FVals[j], make_cuDoubleComplex(cosPhase[j], sinPhase[j]));
+        }
     }
 }
 
@@ -60,14 +93,16 @@ torch::Tensor alm2map(torch::Tensor alm, int nside, int lmax) {
     // Compute the size of the map and number of rings.
     int npix = 12 * nside * nside;
     int nrings = base.pix2ring(npix - 1);
+    int nchunks = (nrings + CHUNKSIZE - 1) / CHUNKSIZE;
+    int nringsPad = nchunks * CHUNKSIZE;
 
     // Create the CUDA arrays for the ring info.
     int *ringPix, *ringStart;
     double *ringTheta, *ringPhi0;
-    cudaMallocManaged(&ringPix, sizeof(int) * nrings);
-    cudaMallocManaged(&ringStart, sizeof(int) * nrings);
-    cudaMallocManaged(&ringTheta, sizeof(double) * nrings);
-    cudaMallocManaged(&ringPhi0, sizeof(double) * nrings);
+    cudaMallocManaged(&ringPix, sizeof(int) * nringsPad);
+    cudaMallocManaged(&ringStart, sizeof(int) * nringsPad);
+    cudaMallocManaged(&ringTheta, sizeof(double) * nringsPad);
+    cudaMallocManaged(&ringPhi0, sizeof(double) * nringsPad);
 
     // Get all of the relevant info for the ring.
 #pragma omp parallel for
@@ -80,12 +115,12 @@ torch::Tensor alm2map(torch::Tensor alm, int nside, int lmax) {
     // Create the F array and get the pointer to the alm data.
     cuDoubleComplex *almPtr, *F;
     almPtr = (cuDoubleComplex *) alm.data<torch::complex<double>>();
-    cudaMallocManaged(&F, sizeof(cuDoubleComplex) * (lmax + 1) * nrings);
+    cudaMallocManaged(&F, sizeof(cuDoubleComplex) * (lmax + 1) * nringsPad);
 
     // Launch the kernel to compute F.
     int blockSize, gridSize;
     cudaOccupancyMaxPotentialBlockSize(&gridSize, &blockSize, FKernel, 0, 0);
-    FKernel<<<gridSize, blockSize>>>(lmax, nrings, F, almPtr, ringTheta, ringPhi0, fac1, fac2, fac3);
+    FKernel<<<gridSize, blockSize>>>(lmax, nrings, nchunks, F, almPtr, ringTheta, ringPhi0, fac1, fac2, fac3);
 
     // Create the map tensor.
     torch::Tensor map = torch::zeros(npix, torch::dtype(torch::kFloat64).device(torch::kCUDA));

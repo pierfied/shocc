@@ -9,7 +9,7 @@
 #include <cuComplex.h>
 
 __global__
-void FKernel(int lmax, int nrings, cuDoubleComplex *F, cuDoubleComplex *alm,
+void FKernel(int lmax, int nrings, int nchunks, cuDoubleComplex *F, cuDoubleComplex *alm,
              double *ringTheta, double *ringPhi0, double *fac1, double *fac2, double *fac3);
 
 torch::Tensor alm2map(torch::Tensor alm, int nside, int lmax);
